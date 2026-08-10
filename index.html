@@ -874,9 +874,92 @@
       }, ms);
 
   }
+```javascript
+  /* =========================
+     メイン画面からのメッセージ
+     ========================= */
+
+  window.addEventListener('message', event => {
+
+    const data = event.data;
+
+    if (!data) {
+      return;
+    }
+
+
+    /* =========================
+       入室・退室モード変更
+       ========================= */
+
+    if (data.type === 'FUDO_ENTRY_MODE') {
+
+      setMode(
+        data.action,
+        false
+      );
+
+      return;
+    }
+
+
+    /* =========================
+       記録結果を受信
+       ========================= */
+
+    if (data.type === 'FUDO_ENTRY_RESULT') {
+
+      /*
+       * 念のため、予約されている
+       * カメラ再起動をキャンセル
+       */
+      clearTimeout(restartTimer);
+      restartTimer = null;
+
+
+      /*
+       * カメラが起動していたら停止
+       */
+      stop();
+
+
+      /*
+       * ★ここで初めて
+       * 「○○さんを入室として記録しました。」
+       * を表示
+       */
+      say(
+        data.message || '記録が完了しました。',
+        !!data.error
+      );
+
+
+      /*
+       * ★記録結果を表示してから3秒後に
+       * カメラを再起動
+       */
+      restartTimer = setTimeout(() => {
+
+        restartTimer = null;
+
+        start();
+
+      }, 3000);
+
+      return;
+    }
+
+  });
 
 
   /* =========================
+     初回カメラ起動
+     ========================= */
+
+  start();
+
+})();
+</script>
 
 </body>
 </html>
