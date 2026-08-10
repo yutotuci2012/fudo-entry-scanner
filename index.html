@@ -157,9 +157,19 @@
     }
 
     .status.error{
-      background:#fee2e2;
-      color:#991b1b
-    }
+  background:#fee2e2;
+  color:#991b1b
+}
+
+.status.success-enter{
+  background:#dcfce7;
+  color:#166534
+}
+
+.status.success-exit{
+  background:#fee2e2;
+  color:#991b1b
+}
 
     /* =========================
        ボタン
@@ -398,12 +408,27 @@
      メッセージ表示
      ========================= */
 
-  const say = (text, error) => {
-    status.textContent = text;
-    status.className =
-      'status' + (error ? ' error' : '');
-  };
+  const say = (text, error, resultAction) => {
 
+  status.textContent = text;
+
+  if (error) {
+    status.className = 'status error';
+    return;
+  }
+
+  if (resultAction === '入室') {
+    status.className = 'status success-enter';
+    return;
+  }
+
+  if (resultAction === '退室') {
+    status.className = 'status success-exit';
+    return;
+  }
+
+  status.className = 'status';
+};
 
   /* =========================
      入室・退室モード
@@ -1093,9 +1118,10 @@
 
       // 記録結果を表示
       say(
-        data.message || '記録が完了しました。',
-        !!data.error
-      );
+  data.message || '記録が完了しました。',
+  !!data.error,
+  data.action
+);
 
       /*
        * 「記録しました」の表示を
