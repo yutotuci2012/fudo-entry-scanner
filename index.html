@@ -367,21 +367,18 @@
 <script>
 (() => {
 
-  const video =
-    document.getElementById('video');
+  const video = document.getElementById('video');
+  const status = document.getElementById('status');
+  const photoInput = document.getElementById('photoInput');
 
-  const status =
-    document.getElementById('status');
-
-  const photoInput =
-    document.getElementById('photoInput');
-
-  let stream;
+  let stream = null;
   let active = false;
-  let detector;
-  let reader;
+  let detector = null;
+  let reader = null;
+
   let last = '';
   let lastAt = 0;
+
   let restartTimer = null;
   let action = '自動';
 
@@ -397,17 +394,24 @@
     'codabar'
   ];
 
-  const say = (t, e) => {
-    status.textContent = t;
+  /* =========================
+     メッセージ表示
+     ========================= */
+
+  const say = (text, error) => {
+    status.textContent = text;
     status.className =
-      'status' + (e ? ' error' : '');
+      'status' + (error ? ' error' : '');
   };
+
+
+  /* =========================
+     入室・退室モード
+     ========================= */
 
   const setMode = (next, notify) => {
 
-    if (
-      !['自動','入室','退室'].includes(next)
-    ) {
+    if (!['自動', '入室', '退室'].includes(next)) {
       return;
     }
 
@@ -428,43 +432,20 @@
         ? 'selected exit'
         : 'exit';
 
-    if (
-      notify &&
-      window.opener
-    ) {
+    if (notify && window.opener) {
+
       window.opener.postMessage(
         {
-          type:'FUDO_ENTRY_ACTION',
-          action:next
+          type: 'FUDO_ENTRY_ACTION',
+          action: next
         },
         '*'
       );
+
     }
+
   };
 
-  const waitMeta = () =>
-    new Promise((ok, no) => {
-
-      const t = setTimeout(
-        () => no(
-          new Error(
-            '映像の開始がタイムアウトしました'
-          )
-        ),
-        5000
-      );
-
-      video.onloadedmetadata = () => {
-        clearTimeout(t);
-        ok();
-      };
-
-    });
-
-
-  /* =========================
-     モード切替
-     ========================= */
 
   document.getElementById('auto').onclick =
     () => setMode('自動', true);
@@ -477,7 +458,7 @@
 
 
   /* =========================
-     カメラ操作
+     ボタン
      ========================= */
 
   document.getElementById('retry').onclick =
@@ -491,14 +472,14 @@
 
 
   /* =========================
-     親画面へ準備完了通知
+     親画面へ準備完了を通知
      ========================= */
 
-  if(window.opener){
+  if (window.opener) {
 
     window.opener.postMessage(
       {
-        type:'FUDO_ENTRY_READY'
+        type: 'FUDO_ENTRY_READY'
       },
       '*'
     );
@@ -507,87 +488,104 @@
 
 
   /* =========================
-     ライブカメラ開始
+     映像メタデータ待ち
      ========================= */
 
-  async function start(){
+  const waitMeta = () => {
+
+    return new Promise((resolve, reject) => {
+
+      const timer = setTimeout(() => {
+
+        reject(
+          new Error(
+            '映像の開始がタイムアウトしました'
+          )
+        );
+
+      }, 5000);
+
+      video.onloadedmetadata = () => {
+
+        clearTimeout(timer);
+        resolve();
+
+      };
+
+    });
+
+  };
+
+
+  /* =========================
+     カメラ起動
+     ========================= */
+
+  async function start() {
 
     stop();
 
-    say(
-      '前面カメラを起動しています…'
-    );
+    say('前面カメラを起動しています…');
 
     let lastError;
 
-    const choices = [
-      {
-        video:{
-          facingMode:{
-            exact:'user'
-          },
-          width:{
-            ideal:1280
-          },
-          height:{
-            ideal:720
-          }
+    const constraints = {
+      video: {
+        facingMode: {
+          exact: 'user'
         },
-        audio:false
-      }
-    ];
-
-    for(
-      const constraints of choices
-    ){
-
-      try{
-
-        stream =
-          await navigator.mediaDevices
-            .getUserMedia(constraints);
-
-        video.srcObject =
-          stream;
-
-        await waitMeta();
-
-        await video.play();
-
-        if(
-          video.videoWidth < 1
-        ){
-          throw new Error(
-            'カメラ映像を受信できません'
-          );
+        width: {
+          ideal: 1280
+        },
+        height: {
+          ideal: 720
         }
+      },
+      audio: false
+    };
 
-        break;
+    try {
 
-      }catch(e){
+      stream =
+        await navigator.mediaDevices
+          .getUserMedia(constraints);
 
-        lastError = e;
-        stop();
+      video.srcObject = stream;
+
+      await waitMeta();
+
+      await video.play();
+
+      if (video.videoWidth < 1) {
+
+        throw new Error(
+          'カメラ映像を受信できません'
+        );
 
       }
+
+    } catch (e) {
+
+      lastError = e;
+      stop();
 
     }
 
 
-    if(!stream){
+    if (!stream) {
 
       const name =
-        lastError &&
-        lastError.name;
+        lastError && lastError.name;
 
       say(
         name === 'NotAllowedError'
-          ? 'カメラを許可してください。Chromeのサイト設定とAndroidのChrome権限を確認後、「カメラを再起動」を押します。'
+          ? 'カメラを許可してください。Chromeのサイト設定とAndroidのChrome権限を確認後、「ライブカメラを再起動」を押してください。'
           : '前面カメラを開始できません。ほかのアプリを閉じ、Chromeを再起動してから試してください。',
         true
       );
 
       return;
+
     }
 
 
@@ -598,11 +596,9 @@
        BarcodeDetector
        ========================= */
 
-    if(
-      'BarcodeDetector' in window
-    ){
+    if ('BarcodeDetector' in window) {
 
-      try{
+      try {
 
         detector =
           new BarcodeDetector({
@@ -617,7 +613,9 @@
 
         return;
 
-      }catch(e){}
+      } catch (e) {
+        detector = null;
+      }
 
     }
 
@@ -631,20 +629,26 @@
   }
 
 
-  function nativeScan(){
+  /* =========================
+     標準BarcodeDetector
+     ========================= */
 
-    if(!active){
+  function nativeScan() {
+
+    if (!active || !detector) {
       return;
     }
 
     detector
       .detect(video)
-      .then(x => {
+      .then(results => {
 
-        if(x.length){
-          done(
-            x[0].rawValue
+        if (results.length) {
+
+          handleScan(
+            results[0].rawValue
           );
+
         }
 
       })
@@ -652,29 +656,37 @@
 
       .finally(() => {
 
-        requestAnimationFrame(
-          nativeScan
-        );
+        if (active) {
+
+          requestAnimationFrame(
+            nativeScan
+          );
+
+        }
 
       });
 
   }
 
 
-  function zxingScan(){
+  /* =========================
+     ZXing
+     ========================= */
 
-    if(
-      !window.ZXingBrowser
-    ){
+  function zxingScan() {
 
-      return say(
+    if (!window.ZXingBrowser) {
+
+      say(
         '読取機能を読み込めません。通信を確認してください。',
         true
       );
 
+      return;
+
     }
 
-    try{
+    try {
 
       reader =
         new ZXingBrowser
@@ -682,12 +694,14 @@
 
       reader.decodeFromVideoElementContinuously(
         video,
-        (r) => {
+        result => {
 
-          if(r){
-            done(
-              r.getText()
+          if (result) {
+
+            handleScan(
+              result.getText()
             );
+
           }
 
         }
@@ -697,7 +711,7 @@
         'コードを枠内にかざしてください。'
       );
 
-    }catch(e){
+    } catch (e) {
 
       say(
         '読取を開始できませんでした。',
@@ -710,16 +724,82 @@
 
 
   /* =========================
+     読み取り処理
+     ========================= */
+
+  function handleScan(id) {
+
+    id = String(id || '').trim();
+
+    const now = Date.now();
+
+    if (!id) {
+      return;
+    }
+
+    // 同じコードの連続読み取りを防止
+    if (
+      id === last &&
+      now - lastAt < 2500
+    ) {
+      return;
+    }
+
+    last = id;
+    lastAt = now;
+
+    // カメラを停止
+    stop();
+
+    if (window.opener) {
+
+      // まず「記録しています」を表示
+      say(
+        '読み取り完了: ' +
+        id +
+        '。記録しています…'
+      );
+
+      // 親画面へIDを送信
+      window.opener.postMessage(
+        {
+          type: 'FUDO_ENTRY_SCAN',
+          id: id
+        },
+        '*'
+      );
+
+      /*
+       * ここではカメラを再起動しない。
+       *
+       * 親画面から記録結果
+       * FUDO_ENTRY_RESULT
+       * が返ってきた後に再起動する。
+       */
+
+    } else {
+
+      say(
+        '読み取りは完了しました。必ずFudo Entry画面の「読取画面を開く」から開いてください。',
+        true
+      );
+
+    }
+
+  }
+
+
+  /* =========================
      撮影画像から読み取る
      ========================= */
 
-  async function readPhoto(){
+  async function readPhoto() {
 
     const file =
       photoInput.files &&
       photoInput.files[0];
 
-    if(!file){
+    if (!file) {
       return;
     }
 
@@ -729,19 +809,18 @@
       '撮影画像を読み取っています…'
     );
 
-    const image =
-      new Image();
+    const image = new Image();
 
     const url =
       URL.createObjectURL(file);
 
-    try{
+    try {
 
       await new Promise(
-        (ok, no) => {
+        (resolve, reject) => {
 
-          image.onload = ok;
-          image.onerror = no;
+          image.onload = resolve;
+          image.onerror = reject;
           image.src = url;
 
         }
@@ -756,18 +835,18 @@
           image
         );
 
-      done(
+      handleScan(
         result.getText()
       );
 
-    }catch(e){
+    } catch (e) {
 
       say(
         'コードを読み取れませんでした。明るい場所で、コード全体が大きく写るように撮影してください。',
         true
       );
 
-    }finally{
+    } finally {
 
       URL.revokeObjectURL(url);
       photoInput.value = '';
@@ -778,189 +857,26 @@
 
 
   /* =========================
-     再起動予約
+     カメラ再起動予約
      ========================= */
 
-  function queueRestart(ms){
+  function queueRestart(ms) {
 
-    clearTimeout(
-      restartTimer
-    );
+    clearTimeout(restartTimer);
 
     restartTimer =
-      setTimeout(
-        () => {
+      setTimeout(() => {
 
-          restartTimer = null;
+        restartTimer = null;
 
-          start();
+        start();
 
-        },
-        ms
-      );
+      }, ms);
 
   }
 
 
   /* =========================
-     読み取り完了
-     ========================= */
-
-  function done(id){
-
-    id =
-      String(id || '').trim();
-
-    const now =
-      Date.now();
-
-    if(
-      !id ||
-      (
-        id === last &&
-        now - lastAt < 2500
-      )
-    ){
-      return;
-    }
-
-    last = id;
-    lastAt = now;
-
-    stop();
-
-    if(window.opener){
-
-      say(
-        '読み取り完了: ' +
-        id +
-        '。記録しています…'
-      );
-
-      window.opener.postMessage(
-        {
-          type:'FUDO_ENTRY_SCAN',
-          id:id
-        },
-        '*'
-      );
-
-      queueRestart(2500);
-
-    }else{
-
-      say(
-        '読み取りは完了しました。必ずFudo Entry画面の「読取画面を開く」から開いてください。',
-        true
-      );
-
-    }
-
-  }
-
-
-  /* =========================
-     親画面からのメッセージ
-     ========================= */
-
-  window.addEventListener(
-    'message',
-    event => {
-
-      const data =
-        event.data;
-
-      if(!data){
-        return;
-      }
-
-      if(
-        data.type ===
-        'FUDO_ENTRY_MODE'
-      ){
-
-        setMode(
-          data.action,
-          false
-        );
-
-        return;
-      }
-
-
-      if(
-        data.type !==
-        'FUDO_ENTRY_RESULT'
-      ){
-        return;
-      }
-
-      clearTimeout(
-        restartTimer
-      );
-
-      restartTimer = null;
-
-      say(
-        data.message,
-        !!data.error
-      );
-
-      if(!data.error){
-
-        queueRestart(2000);
-
-      }
-
-    }
-  );
-
-
-  /* =========================
-     カメラ停止
-     ========================= */
-
-  function stop(){
-
-    active = false;
-
-    detector = null;
-
-    if(reader){
-
-      try{
-        reader.reset();
-      }catch(e){}
-
-      reader = null;
-
-    }
-
-    if(stream){
-
-      stream
-        .getTracks()
-        .forEach(
-          t => t.stop()
-        );
-
-      stream = null;
-
-    }
-
-    video.srcObject = null;
-
-  }
-
-
-  /* =========================
-     起動
-     ========================= */
-
-  start();
-
-})();
-</script>
 
 </body>
 </html>
