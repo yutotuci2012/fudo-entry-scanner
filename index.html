@@ -220,4 +220,747 @@
 
     <svg
       class="logo-mark"
-      viewBox="0
+      viewBox="0 0 200 200"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-label="Fudo Entry"
+      role="img">
+
+      <!-- オレンジの円弧 -->
+      <path
+        d="M88 20
+           C45 28 17 64 17 105
+           C17 148 47 179 89 184"
+        fill="none"
+        stroke="#ff7a00"
+        stroke-width="13"
+        stroke-linecap="round"/>
+
+      <!-- 緑の円弧 -->
+      <path
+        d="M111 20
+           C154 27 183 64 183 105
+           C183 148 153 179 111 184"
+        fill="none"
+        stroke="#4cae22"
+        stroke-width="13"
+        stroke-linecap="round"/>
+
+      <!-- ドア枠 -->
+      <path
+        d="M103 45
+           H151
+           V157"
+        fill="none"
+        stroke="#4cae22"
+        stroke-width="12"
+        stroke-linecap="square"/>
+
+      <!-- 開いたドア -->
+      <path
+        d="M66 50
+           L126 76
+           V171
+           L66 150
+           Z"
+        fill="#ff7a00"/>
+
+      <!-- ドアノブ -->
+      <circle
+        cx="108"
+        cy="117"
+        r="7"
+        fill="#ffffff"/>
+    </svg>
+
+    <div class="logo-text">
+      <span class="fudo">Fudo</span>
+      <span class="entry">Entry</span>
+    </div>
+
+  </div>
+
+
+  <!-- =========================
+       入退室モード
+       ========================= -->
+
+  <div class="mode">
+    <button
+      id="auto"
+      class="selected auto"
+      type="button">
+      自動
+    </button>
+
+    <button
+      id="enter"
+      class="enter"
+      type="button">
+      入室
+    </button>
+
+    <button
+      id="exit"
+      class="exit"
+      type="button">
+      退室
+    </button>
+  </div>
+
+
+  <!-- =========================
+       カメラ
+       ========================= -->
+
+  <div class="camera">
+    <video
+      id="video"
+      muted
+      playsinline
+      autoplay>
+    </video>
+
+    <div class="guide"></div>
+  </div>
+
+
+  <!-- =========================
+       ステータス
+       ========================= -->
+
+  <div
+    id="status"
+    class="status">
+    カメラを起動しています…
+  </div>
+
+
+  <!-- =========================
+       操作ボタン
+       ========================= -->
+
+  <button
+    id="retry"
+    type="button">
+    ライブカメラを再起動
+  </button>
+
+  <button
+    id="photo"
+    class="sub"
+    type="button">
+    カメラで撮影して読み取る
+  </button>
+
+  <input
+    id="photoInput"
+    class="hidden"
+    type="file"
+    accept="image/*"
+    capture="environment">
+
+</main>
+
+
+<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
+
+<script>
+(() => {
+
+  const video =
+    document.getElementById('video');
+
+  const status =
+    document.getElementById('status');
+
+  const photoInput =
+    document.getElementById('photoInput');
+
+  let stream;
+  let active = false;
+  let detector;
+  let reader;
+  let last = '';
+  let lastAt = 0;
+  let restartTimer = null;
+  let action = '自動';
+
+  const formats = [
+    'qr_code',
+    'code_128',
+    'code_39',
+    'ean_13',
+    'ean_8',
+    'upc_a',
+    'upc_e',
+    'itf',
+    'codabar'
+  ];
+
+  const say = (t, e) => {
+    status.textContent = t;
+    status.className =
+      'status' + (e ? ' error' : '');
+  };
+
+  const setMode = (next, notify) => {
+
+    if (
+      !['自動','入室','退室'].includes(next)
+    ) {
+      return;
+    }
+
+    action = next;
+
+    document.getElementById('auto').className =
+      next === '自動'
+        ? 'selected auto'
+        : 'auto';
+
+    document.getElementById('enter').className =
+      next === '入室'
+        ? 'selected enter'
+        : 'enter';
+
+    document.getElementById('exit').className =
+      next === '退室'
+        ? 'selected exit'
+        : 'exit';
+
+    if (
+      notify &&
+      window.opener
+    ) {
+      window.opener.postMessage(
+        {
+          type:'FUDO_ENTRY_ACTION',
+          action:next
+        },
+        '*'
+      );
+    }
+  };
+
+  const waitMeta = () =>
+    new Promise((ok, no) => {
+
+      const t = setTimeout(
+        () => no(
+          new Error(
+            '映像の開始がタイムアウトしました'
+          )
+        ),
+        5000
+      );
+
+      video.onloadedmetadata = () => {
+        clearTimeout(t);
+        ok();
+      };
+
+    });
+
+
+  /* =========================
+     モード切替
+     ========================= */
+
+  document.getElementById('auto').onclick =
+    () => setMode('自動', true);
+
+  document.getElementById('enter').onclick =
+    () => setMode('入室', true);
+
+  document.getElementById('exit').onclick =
+    () => setMode('退室', true);
+
+
+  /* =========================
+     カメラ操作
+     ========================= */
+
+  document.getElementById('retry').onclick =
+    start;
+
+  document.getElementById('photo').onclick =
+    () => photoInput.click();
+
+  photoInput.onchange =
+    readPhoto;
+
+
+  /* =========================
+     親画面へ準備完了通知
+     ========================= */
+
+  if(window.opener){
+
+    window.opener.postMessage(
+      {
+        type:'FUDO_ENTRY_READY'
+      },
+      '*'
+    );
+
+  }
+
+
+  /* =========================
+     ライブカメラ開始
+     ========================= */
+
+  async function start(){
+
+    stop();
+
+    say(
+      '前面カメラを起動しています…'
+    );
+
+    let lastError;
+
+    const choices = [
+      {
+        video:{
+          facingMode:{
+            exact:'user'
+          },
+          width:{
+            ideal:1280
+          },
+          height:{
+            ideal:720
+          }
+        },
+        audio:false
+      }
+    ];
+
+    for(
+      const constraints of choices
+    ){
+
+      try{
+
+        stream =
+          await navigator.mediaDevices
+            .getUserMedia(constraints);
+
+        video.srcObject =
+          stream;
+
+        await waitMeta();
+
+        await video.play();
+
+        if(
+          video.videoWidth < 1
+        ){
+          throw new Error(
+            'カメラ映像を受信できません'
+          );
+        }
+
+        break;
+
+      }catch(e){
+
+        lastError = e;
+        stop();
+
+      }
+
+    }
+
+
+    if(!stream){
+
+      const name =
+        lastError &&
+        lastError.name;
+
+      say(
+        name === 'NotAllowedError'
+          ? 'カメラを許可してください。Chromeのサイト設定とAndroidのChrome権限を確認後、「カメラを再起動」を押します。'
+          : '前面カメラを開始できません。ほかのアプリを閉じ、Chromeを再起動してから試してください。',
+        true
+      );
+
+      return;
+    }
+
+
+    active = true;
+
+
+    /* =========================
+       BarcodeDetector
+       ========================= */
+
+    if(
+      'BarcodeDetector' in window
+    ){
+
+      try{
+
+        detector =
+          new BarcodeDetector({
+            formats
+          });
+
+        say(
+          'コードを枠内にかざしてください。'
+        );
+
+        nativeScan();
+
+        return;
+
+      }catch(e){}
+
+    }
+
+
+    /* =========================
+       ZXing
+       ========================= */
+
+    zxingScan();
+
+  }
+
+
+  function nativeScan(){
+
+    if(!active){
+      return;
+    }
+
+    detector
+      .detect(video)
+      .then(x => {
+
+        if(x.length){
+          done(
+            x[0].rawValue
+          );
+        }
+
+      })
+      .catch(() => {})
+
+      .finally(() => {
+
+        requestAnimationFrame(
+          nativeScan
+        );
+
+      });
+
+  }
+
+
+  function zxingScan(){
+
+    if(
+      !window.ZXingBrowser
+    ){
+
+      return say(
+        '読取機能を読み込めません。通信を確認してください。',
+        true
+      );
+
+    }
+
+    try{
+
+      reader =
+        new ZXingBrowser
+          .BrowserMultiFormatReader();
+
+      reader.decodeFromVideoElementContinuously(
+        video,
+        (r) => {
+
+          if(r){
+            done(
+              r.getText()
+            );
+          }
+
+        }
+      );
+
+      say(
+        'コードを枠内にかざしてください。'
+      );
+
+    }catch(e){
+
+      say(
+        '読取を開始できませんでした。',
+        true
+      );
+
+    }
+
+  }
+
+
+  /* =========================
+     撮影画像から読み取る
+     ========================= */
+
+  async function readPhoto(){
+
+    const file =
+      photoInput.files &&
+      photoInput.files[0];
+
+    if(!file){
+      return;
+    }
+
+    stop();
+
+    say(
+      '撮影画像を読み取っています…'
+    );
+
+    const image =
+      new Image();
+
+    const url =
+      URL.createObjectURL(file);
+
+    try{
+
+      await new Promise(
+        (ok, no) => {
+
+          image.onload = ok;
+          image.onerror = no;
+          image.src = url;
+
+        }
+      );
+
+      const r =
+        new ZXingBrowser
+          .BrowserMultiFormatReader();
+
+      const result =
+        await r.decodeFromImageElement(
+          image
+        );
+
+      done(
+        result.getText()
+      );
+
+    }catch(e){
+
+      say(
+        'コードを読み取れませんでした。明るい場所で、コード全体が大きく写るように撮影してください。',
+        true
+      );
+
+    }finally{
+
+      URL.revokeObjectURL(url);
+      photoInput.value = '';
+
+    }
+
+  }
+
+
+  /* =========================
+     再起動予約
+     ========================= */
+
+  function queueRestart(ms){
+
+    clearTimeout(
+      restartTimer
+    );
+
+    restartTimer =
+      setTimeout(
+        () => {
+
+          restartTimer = null;
+
+          start();
+
+        },
+        ms
+      );
+
+  }
+
+
+  /* =========================
+     読み取り完了
+     ========================= */
+
+  function done(id){
+
+    id =
+      String(id || '').trim();
+
+    const now =
+      Date.now();
+
+    if(
+      !id ||
+      (
+        id === last &&
+        now - lastAt < 2500
+      )
+    ){
+      return;
+    }
+
+    last = id;
+    lastAt = now;
+
+    stop();
+
+    if(window.opener){
+
+      say(
+        '読み取り完了: ' +
+        id +
+        '。記録しています…'
+      );
+
+      window.opener.postMessage(
+        {
+          type:'FUDO_ENTRY_SCAN',
+          id:id
+        },
+        '*'
+      );
+
+      queueRestart(2500);
+
+    }else{
+
+      say(
+        '読み取りは完了しました。必ずFudo Entry画面の「読取画面を開く」から開いてください。',
+        true
+      );
+
+    }
+
+  }
+
+
+  /* =========================
+     親画面からのメッセージ
+     ========================= */
+
+  window.addEventListener(
+    'message',
+    event => {
+
+      const data =
+        event.data;
+
+      if(!data){
+        return;
+      }
+
+      if(
+        data.type ===
+        'FUDO_ENTRY_MODE'
+      ){
+
+        setMode(
+          data.action,
+          false
+        );
+
+        return;
+      }
+
+
+      if(
+        data.type !==
+        'FUDO_ENTRY_RESULT'
+      ){
+        return;
+      }
+
+      clearTimeout(
+        restartTimer
+      );
+
+      restartTimer = null;
+
+      say(
+        data.message,
+        !!data.error
+      );
+
+      if(!data.error){
+
+        queueRestart(2000);
+
+      }
+
+    }
+  );
+
+
+  /* =========================
+     カメラ停止
+     ========================= */
+
+  function stop(){
+
+    active = false;
+
+    detector = null;
+
+    if(reader){
+
+      try{
+        reader.reset();
+      }catch(e){}
+
+      reader = null;
+
+    }
+
+    if(stream){
+
+      stream
+        .getTracks()
+        .forEach(
+          t => t.stop()
+        );
+
+      stream = null;
+
+    }
+
+    video.srcObject = null;
+
+  }
+
+
+  /* =========================
+     起動
+     ========================= */
+
+  start();
+
+})();
+</script>
+
+</body>
+</html>
