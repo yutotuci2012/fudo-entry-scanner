@@ -487,6 +487,7 @@
   }
 
 
+
   /* =========================
      映像メタデータ待ち
      ========================= */
@@ -495,7 +496,21 @@
 
     return new Promise((resolve, reject) => {
 
+      // すでに映像情報が取得できている場合
+      if (
+        video.readyState >= 1 &&
+        video.videoWidth > 0
+      ) {
+
+        resolve();
+        return;
+
+      }
+
+
       const timer = setTimeout(() => {
+
+        video.onloadedmetadata = null;
 
         reject(
           new Error(
@@ -503,11 +518,13 @@
           )
         );
 
-      }, 5000);
+      }, 10000);
+
 
       video.onloadedmetadata = () => {
 
         clearTimeout(timer);
+
         resolve();
 
       };
@@ -516,71 +533,182 @@
 
   };
 
-
   /* =========================
      カメラ起動
      ========================= */
 
   async function start() {
 
+    // 既存のカメラを停止
     stop();
 
-    say('前面カメラを起動しています…');
+    say('カメラを起動しています…');
 
-    let lastError;
+    let lastError = null;
 
-    const constraints = {
-      video: {
-        facingMode: {
-          exact: 'user'
+
+    /*
+     * まず前面カメラを試す
+     * exact を使わず、対応できる端末を増やす
+     */
+    const constraintsList = [
+
+      {
+        video: {
+          facingMode: 'user',
+          width: {
+            ideal: 1280
+          },
+          height: {
+            ideal: 720
+          }
         },
-        width: {
-          ideal: 1280
-        },
-        height: {
-          ideal: 720
-        }
+        audio: false
       },
-      audio: false
-    };
 
-    try {
-
-      stream =
-        await navigator.mediaDevices
-          .getUserMedia(constraints);
-
-      video.srcObject = stream;
-
-      await waitMeta();
-
-      await video.play();
-
-      if (video.videoWidth < 1) {
-
-        throw new Error(
-          'カメラ映像を受信できません'
-        );
-
+      /*
+       * 前面指定が使えない場合のフォールバック
+       */
+      {
+        video: true,
+        audio: false
       }
 
-    } catch (e) {
+    ];
 
-      lastError = e;
-      stop();
+
+    for (const constraints of constraintsList) {
+
+      try {
+
+        say('カメラへのアクセスを確認しています…');
+
+
+        /*
+         * getUserMedia が永久に待たないように
+         * 15秒でタイムアウト
+         */
+        const mediaPromise =
+          navigator.mediaDevices.getUserMedia(
+            constraints
+          );
+
+        const timeoutPromise =
+          new Promise((_, reject) => {
+
+            setTimeout(() => {
+
+              reject(
+                new Error(
+                  'カメラ起動がタイムアウトしました'
+                )
+              );
+
+            }, 15000);
+
+          });
+
+
+        stream =
+          await Promise.race([
+            mediaPromise,
+            timeoutPromise
+          ]);
+
+
+        /*
+         * カメラ取得成功
+         */
+        if (stream) {
+          break;
+        }
+
+
+      } catch (e) {
+
+        lastError = e;
+
+        stop();
+
+      }
 
     }
 
 
+    /*
+     * カメラを取得できなかった
+     */
     if (!stream) {
 
       const name =
-        lastError && lastError.name;
+        lastError &&
+        lastError.name;
+
+
+      if (name === 'NotAllowedError') {
+
+        say(
+          'カメラの使用が許可されていません。Chromeのサイト設定でカメラを許可してから、「ライブカメラを再起動」を押してください。',
+          true
+        );
+
+      } else if (name === 'NotFoundError') {
+
+        say(
+          'カメラが見つかりません。カメラが接続されているか確認してください。',
+          true
+        );
+
+      } else if (name === 'NotReadableError') {
+
+        say(
+          'カメラを使用できません。ほかのアプリがカメラを使用していないか確認してください。',
+          true
+        );
+
+      } else if (
+        lastError &&
+        lastError.message ===
+        'カメラ起動がタイムアウトしました'
+      ) {
+
+        say(
+          'カメラの起動に時間がかかっています。Chromeを再読み込みして、もう一度お試しください。',
+          true
+        );
+
+      } else {
+
+        say(
+          'カメラを起動できませんでした。ブラウザのカメラ権限を確認してください。',
+          true
+        );
+
+      }
+
+      return;
+    }
+
+
+    /*
+     * 映像をvideoにセット
+     */
+    video.srcObject = stream;
+
+
+    /*
+     * metadata待ち
+     */
+    try {
+
+      await waitMeta();
+
+    } catch (e) {
+
+      stop();
 
       say(
-        name === 'NotAllowedError'
-          ? 'カメラを許可してください。Chromeのサイト設定とAndroidのChrome権限を確認後、「ライブカメラを再起動」を押してください。'
-          : '前面カメラを開始できません。ほかのアプリを閉じ、Chromeを再起動してから試してください。',
+        'カメラ映像を開始できませんでした。もう一度お試しください。',
         true
       );
 
@@ -589,6 +717,49 @@
     }
 
 
+    /*
+     * video再生
+     */
+    try {
+
+      await video.play();
+
+    } catch (e) {
+
+      stop();
+
+      say(
+        'カメラ映像を再生できませんでした。もう一度お試しください。',
+        true
+      );
+
+      return;
+
+    }
+
+
+    /*
+     * 映像サイズ確認
+     */
+    if (
+      video.videoWidth < 1 ||
+      video.videoHeight < 1
+    ) {
+
+      stop();
+
+      say(
+        'カメラ映像を取得できませんでした。もう一度お試しください。',
+        true
+      );
+
+      return;
+    }
+
+
+    /*
+     * カメラ起動完了
+     */
     active = true;
 
 
@@ -602,19 +773,23 @@
 
         detector =
           new BarcodeDetector({
-            formats
+            formats: formats
           });
+
 
         say(
           'コードを枠内にかざしてください。'
         );
+
 
         nativeScan();
 
         return;
 
       } catch (e) {
+
         detector = null;
+
       }
 
     }
@@ -856,7 +1031,6 @@
   }
 
 
-```javascript
   /* =========================
      カメラ再起動予約
      ========================= */
@@ -952,4 +1126,3 @@
 
 </body>
 </html>
-```
