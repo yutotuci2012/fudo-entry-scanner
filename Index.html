@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root { --blue:#0f4c81; --green:#087f5b; --red:#bd2c2c; --ink:#172033; }
+    * { box-sizing:border-box; } body { margin:0; background:#f3f6fa; color:var(--ink); font-family:system-ui,-apple-system,"Noto Sans JP",sans-serif; }
+    main { max-width:720px; min-height:100vh; margin:auto; padding:18px; text-align:center; }
+    h1 { margin:4px 0 16px; font-size:28px; } .mode { display:flex; gap:10px; margin-bottom:12px; }
+    button { min-height:56px; border:0; border-radius:12px; font-size:20px; font-weight:700; cursor:pointer; touch-action:manipulation; }
+    .mode button { flex:1; background:#e2e8f0; color:#475569; } .mode button.selected.enter { background:var(--green); color:#fff; } .mode button.selected.exit { background:var(--red); color:#fff; }
+    .camera { position:relative; background:#101828; border-radius:16px; overflow:hidden; aspect-ratio:4/3; } video { width:100%; height:100%; object-fit:cover; display:block; }
+    .guide { position:absolute; left:14%; right:14%; top:25%; bottom:25%; border:3px solid #fff; border-radius:12px; box-shadow:0 0 0 999px rgb(0 0 0 / .18); pointer-events:none; }
+    .controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0; } #start { background:var(--blue); color:white; } #stop { background:#64748b; color:white; }
+    .status { min-height:58px; padding:14px; border-radius:12px; background:#e8eef6; font-size:17px; font-weight:600; } .status.error { background:#fee2e2; color:#991b1b; } .status.success { background:#dcfce7; color:#166534; }
+    .manual { margin-top:16px; padding-top:16px; border-top:1px solid #cbd5e1; } input { width:100%; min-height:54px; border:2px solid #94a3b8; border-radius:10px; padding:8px 12px; font-size:21px; text-align:center; } #send { width:100%; margin-top:10px; background:#334155; color:white; }
+    .small { color:#475569; font-size:14px; margin:12px 0; } .hidden { display:none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1 id="title">Fudo Entry</h1>
+  <div class="mode"><button id="enter" class="selected enter" type="button">入室</button><button id="exit" class="exit" type="button">退室</button></div>
+  <div class="camera"><div class="guide"></div><div style="color:white;padding:30% 15px 0;font-size:18px">カメラ読取は専用の安全な読取画面で行います。</div></div>
+  <div class="controls"><button id="start" type="button">読取画面を開く</button><button id="stop" type="button">画面を閉じる</button></div>
+  <div id="status" class="status" role="status" aria-live="polite">「読取画面を開く」を押し、開いた画面でコードを読み取ってください。</div>
+  <p class="small">カメラが使えない場合は、下にIDを入力して記録できます。</p>
+  <section class="manual"><input id="manualId" inputmode="numeric" autocomplete="off" placeholder="IDを入力（例：001）"><button id="send" type="button">このIDで記録</button></section>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const scannerUrl = <?!= JSON.stringify(scannerUrl) ?>;
+  const scannerOrigin = <?!= JSON.stringify(scannerOrigin) ?>;
+  let action = '入室', scannerWindow = null;
+  google.script.run.withSuccessHandler(c => { $('title').textContent = c.facilityName || 'Fudo Entry'; }).getClientConfig();
+  function message(text, kind) { const el=$('status'); el.textContent=text; el.className='status '+(kind||''); }
+  function setAction(next) { action=next; $('enter').className=next==='入室'?'selected enter':'enter'; $('exit').className=next==='退室'?'selected exit':'exit'; message(next+'を選択中です。コードをかざしてください。'); }
+  $('enter').onclick=()=>setAction('入室'); $('exit').onclick=()=>setAction('退室');
+  $('start').onclick=openScanner; $('stop').onclick=closeScanner; $('send').onclick=()=>submit($('manualId').value, 'manual');
+  $('manualId').addEventListener('keydown', e => { if(e.key==='Enter') submit(e.target.value,'manual'); });
+  function openScanner() { scannerWindow = window.open(scannerUrl, 'fudoEntryScanner'); if (!scannerWindow) message('読取画面を開けません。Chromeのポップアップ許可を確認してください。','error'); else message('開いた読取画面でコードを読み取ってください。完了後、この画面に戻ると自動記録します。'); }
+  function closeScanner() { if (scannerWindow && !scannerWindow.closed) scannerWindow.close(); scannerWindow=null; message('読取画面を閉じました。'); }
+  window.addEventListener('message', event => { if (event.origin !== scannerOrigin || !event.data || event.data.type !== 'FUDO_ENTRY_SCAN') return; const id=String(event.data.id||'').trim(); if(!id) return; message('ID「'+id+'」を確認しました。記録しています…'); submit(id,'camera'); });
+  function submit(id, source) { id=String(id||'').trim(); if(!id) return message('IDを入力するか、コードを読み取ってください。','error');
+    google.script.run.withSuccessHandler(r=>{ message(r.name+' さんを'+r.action+'として'+(r.duplicate?'確認しました。':'記録しました。'), r.duplicate?'':'success'); $('manualId').value=''; })
+      .withFailureHandler(e=>message((e&&e.message)||'記録に失敗しました。','error'))
+      .recordMovement({id,action,source,device:navigator.userAgent.slice(0,180)});
+  }
+})();
+</script>
+</body>
+</html>
