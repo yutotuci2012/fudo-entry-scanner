@@ -98,6 +98,16 @@
       color:#991b1b
     }
 
+    .mode button.admin{
+      background:#ede9fe;
+      color:#5b21b6
+    }
+
+    .mode button.selected.admin{
+      background:#6d28d9;
+      color:#fff
+    }
+
     .mode button.selected.auto{
       background:var(--orange);
       color:#fff
@@ -321,6 +331,13 @@
       type="button">
       退室
     </button>
+
+    <button
+      id="admin"
+      class="admin"
+      type="button">
+      管理者
+    </button>
   </div>
 
 
@@ -449,7 +466,7 @@
 
   const setMode = (next, notify) => {
 
-    if (!['自動', '入室', '退室'].includes(next)) {
+    if (!['自動', '入室', '退室', '管理者'].includes(next)) {
       return;
     }
 
@@ -469,6 +486,11 @@
       next === '退室'
         ? 'selected exit'
         : 'exit';
+
+    document.getElementById('admin').className =
+      next === '管理者'
+        ? 'selected admin'
+        : 'admin';
 
     if (notify && window.opener) {
 
@@ -493,6 +515,9 @@
 
   document.getElementById('exit').onclick =
     () => setMode('退室', true);
+
+  document.getElementById('admin').onclick =
+    () => setMode('管理者', true);
 
 
   /* =========================
@@ -992,17 +1017,22 @@
 
       // まず「記録しています」を表示
       say(
-        '読み取り完了: ' +
-        id +
-        '。記録しています…'
+        action === '管理者'
+          ? '管理者コードを読み取りました。認証しています…'
+          : '読み取り完了: ' + id + '。記録しています…'
       );
 
       // 親画面へIDを送信
       window.opener.postMessage(
-        {
-          type: 'FUDO_ENTRY_SCAN',
-          id: id
-        },
+        action === '管理者'
+          ? {
+              type: 'FUDO_ENTRY_ADMIN_SCAN',
+              id: id
+            }
+          : {
+              type: 'FUDO_ENTRY_SCAN',
+              id: id
+            },
         '*'
       );
 
@@ -1136,6 +1166,16 @@
         false
       );
 
+      return;
+    }
+
+    /*
+     * Fudo Bus管理者認証モード
+     * 親のFudo Entry画面から管理者モードを指定できます。
+     */
+    if (data.type === 'FUDO_ENTRY_ADMIN_MODE') {
+      setMode('管理者', false);
+      say('管理者用バーコードを枠内にかざしてください。');
       return;
     }
 
